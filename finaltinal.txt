@@ -1,0 +1,142 @@
+import investpy
+import pandas as pd
+from datetime import timedelta
+print('Asiqman here, type your stock name in block letters')
+stockpn=str(input())
+
+print('write date in the following format 8484/8m/8d')
+noticepn=str(input())
+
+asiq_stock = stockpn
+notice_date= noticepn
+
+estimation_window=100
+subtracted_date = pd.to_datetime(notice_date) - timedelta(days=estimation_window)
+subtracted_date = subtracted_date.strftime("%Y-%m-%d")
+added_date = pd.to_datetime(notice_date) + timedelta(days=estimation_window)
+added_date = added_date.strftime("%Y-%m-%d")
+subtracted_splitter = subtracted_date.split("-")
+start_date='{}/{}/{}'.format(subtracted_splitter[2],subtracted_splitter[1],subtracted_splitter[0])
+added_splitter = added_date.split("-")
+end_date='{}/{}/{}'.format(added_splitter[2],added_splitter[1],added_splitter[0])
+
+
+# fetch stock 
+
+stock = investpy.get_stock_historical_data(stock= "{}".format(asiq_stock),
+                                                 country="Bangladesh",
+                                                 from_date= start_date,
+                                                 to_date=end_date,
+                                                 as_json=False,
+                                                 order='ascending',
+                                                 interval='Daily')
+#drop Stock
+
+stock.drop(columns=['Open','High','Low','Volume','Currency'], inplace = True)
+
+
+#stock return
+stock_change=stock.pct_change()
+
+
+# fetch DSE Broad
+
+DSE = investpy.indices.get_index_historical_data(index= "DSE Broad",
+                                                 country="Bangladesh",
+                                                 from_date= start_date,
+                                                 to_date=end_date,
+                                                 as_json=False,
+                                                 order='ascending',
+                                                 interval='Daily')
+
+#drop columns DSE
+
+DSE.drop(columns=['Open','High','Low','Volume','Currency'], inplace = True)
+
+#DSE return
+
+DSE_change = DSE.pct_change()
+
+
+#Market-adjusted model
+market_adj_model= stock_change - DSE_change
+
+
+#rename the columns
+stock = stock.rename(columns={'Close': 'stock closing price'})
+market_adj_model = market_adj_model.rename(columns={'Close': 'Market-adjusted model'})
+DSE = DSE.rename(columns={'Close': 'DSE price'})
+stock_change=stock_change.rename(columns={'Close': 'Stock return'})
+DSE_change=DSE_change.rename(columns={'Close': 'DSE return'})
+
+
+#Dataframe creation , new table , combining
+df= pd.concat([stock,stock_change,DSE,DSE_change,market_adj_model], axis=1)
+
+df.to_csv(r'{}_a_by_asiq.csv'.format(asiq_stock), index = True)
+kf = pd.read_csv (r'{}_a_by_asiq.csv'.format(asiq_stock))
+
+
+date_finder_split= notice_date.split("/")
+date_finder='{}-{}-{}'.format(date_finder_split[0],date_finder_split[1],date_finder_split[2])
+
+pl=kf.index[kf['Date']=='{}'.format(date_finder)].tolist()
+pl[0]
+dtrange = pl[0]
+date_one=kf.iloc[dtrange-10:dtrange+11]
+date_one
+date_one.to_csv(r'{}_b_by_asiq.csv'.format(asiq_stock), index = False)
+
+date_two=kf.iloc[dtrange-67:dtrange-10]
+date_two
+
+date_two.to_csv(r'{}_c_by_asiq.csv'.format(asiq_stock),index = False)
+calcintercept = pd.read_csv (r'{}_c_by_asiq.csv'.format(asiq_stock))
+
+
+avgp=calcintercept[["Stock return"]].mean()
+
+calcintercept['Const adj model'] = calcintercept['Market-adjusted model'] - float(avgp)
+
+stdp = calcintercept[["Market-adjusted model"]].std()
+
+avg=date_two[["Stock return"]].mean()
+
+idep_var = calcintercept['DSE return']
+dep_var = calcintercept['Stock return']
+
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+model = ols('idep_var ~ dep_var', data=calcintercept).fit()
+anova_table = sm.stats.anova_lm(model, typ=2)
+
+import statsmodels.formula.api as sm
+eset = sm.ols(formula='idep_var ~ dep_var', data=calcintercept).fit()
+
+calcintercept['CAPM'] = calcintercept['Stock return'] -  (eset.params[0] + eset.params[1] * calcintercept['DSE return'])
+
+calcintercept.to_csv(r'{}_d_by_asiq.csv'.format(asiq_stock), index = False)
+calcintercept.drop(columns=['stock closing price','Stock return','DSE price','DSE return'], inplace = True)
+stda=calcintercept[['Market-adjusted model']].std()
+stdb=calcintercept[['CAPM']].std()
+stdc=calcintercept[['Const adj model']].std()
+import math 
+
+stda1=stda*(math.sqrt(10)) 
+stdb1=stdb*(math.sqrt(10)) 
+stdc1=stdc*(math.sqrt(10)) 
+
+
+stda2=stda*(math.sqrt(21))
+stdb2=stdb*(math.sqrt(21)) 
+stdc2=stdc*(math.sqrt(21)) 
+
+
+kingh= pd.DataFrame([[stda,stdb,stdc]],columns=['Market-adjusted','CAPM','Const adj model'])
+zingh= pd.DataFrame([[stda1,stdb1,stdc1]],columns=['Market-adjusted 10 days','CAPM 10 days','Const adj model 10days'])
+singh= pd.DataFrame([[stda2,stdb2,stdc2]],columns=['Market-adjusted 21 days','CAPM 21 days','Const adj model 21days'])
+std_table = pd.concat([kingh,zingh,singh], axis=1)
+std_table.to_csv(r'{}_std_by_asiq.csv'.format(asiq_stock), index = False)
+
+
+print('congrats, Your file is now ready. Good luck #24084')
